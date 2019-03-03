@@ -1,0 +1,240 @@
+---
+title: "Optional Project 1 (Coca-Cola)"
+author: "Group F"
+date: "2/16/2019"
+output: html_document
+---
+
+## Data and Library Load
+```{r setup, include=FALSE}
+
+if(!"fBasics" %in% installed.packages()) {install.packages("fBasics")}
+library(fBasics)
+if(!"forecast" %in% installed.packages()) {install.packages("forecast")}
+library(forecast) 
+
+data<-read.csv("coca_cola_earnings.csv",header=TRUE,sep=";",dec=",")
+y<-data[,2] 
+
+#Take training set in order to test model accuracy
+sample_size <- trunc(length(y)*.8,0)
+y_train <- y[1:sample_size]
+```
+
+## Preliminary Analysis
+Initial analysis of the data set reveals that it is non-statinoary and with a clear presence of seasonality.
+```{r}
+ts.plot(y_train)
+
+nlags=40
+
+acf(y_train,nlags)
+pacf(y_train,nlags) 
+```
+
+## Test for and Apply Differences
+Applying statistical tests, it is clear that one difference must be taken take account for **both** regular differences and seasonal differences in order to make the data stationary. Therefore, the first iteration of the model will be a SARIMA (0,1,0) x (0,1,0).
+```{r}
+s=4      # seasonal parameter 
+nsdiffs(y_train,m=s,test=c("ocsb"))  # seasonal differences?
+ndiffs(y_train, alpha=0.05, test=c("adf")) # regular differences?
+
+fit<-arima(y_train,order=c(0,1,0),seasonal=list(order=c(0,1,0),period=s)) 
+fit
+
+ts.plot(fit$residuals)
+acf(fit$residuals,nlags)
+pacf(fit$residuals,nlags) 
+
+```
+## Apply Seasonal ARIMA Model
+Analyzing the previous ACF and PACF curves, it is apparent that there is a substanial limit breach at lag 4 with a dampening effect the subsequent 4 period intervals. As a result, SARIMA (0,1,0) x (1,1,0) was applied. According to the model coefficient output and ACF/PACF graphs, it is clear that the inclusion of this first degree variable is beneficial as it's coefficient is statistically different from 0 and there are no longer seasonal lags breaching limits.
+```{r}
+fit<-arima(y_train,order=c(0,1,0),seasonal=list(order=c(1,1,0),period=s)) 
+fit
+
+ts.plot(fit$residuals)
+acf(fit$residuals,nlags)
+pacf(fit$residuals,nlags) 
+```
+## Apply Standard ARIMA Model
+Analyzing the previous ACF and PACF curves, the most substanial limit breach occurs at lag 10 in the PACF graph. Therefore SARIMA (10,1,0) x (1,1,0) will be applied. Looking at the resulting ACF/PACF graphs it appears this should be a suitable model, however viewing the model coeffcients, the SARIMA coefficient is no longer significant.
+```{r}
+# estimate the SAR and analyze the estimated parameters. Compare with the Seasonal Difference
+model_fit1<-arima(y_train,order=c(10,1,0),seasonal=list(order=c(1,1,0),period=s)) 
+model_fit1
+
+ts.plot(model_fit1$residuals)
+acf(model_fit1$residuals,nlags)
+pacf(model_fit1$residuals,nlags) 
+```
+## Remove Seasonal AR(1)
+Per the above, in order to minimize model complexity the Seasonal Autoregressive portion of the model will be removed (excluding the seasonal differences). The residuals remain within limits within all relevant lags and the standard AR(10) coefficient is found to be significant. Therefore, this model will be deployed for forecasting.
+```{r}
+# estimate the SAR and analyze the estimated parameters. Compare with the Seasonal Difference
+model_fit2<-arima(y_train,order=c(10,1,0),seasonal=list(order=c(0,1,0),period=s)) 
+model_fit2
+
+ts.plot(model_fit2$residuals)
+acf(model_fit2$residuals,nlags)
+pacf(model_fit2$residuals,nlags) 
+```
+
+## Apply logarithms to deal with increasing variance
+```{r}
+z <- log(y_train)
+ts.plot(z)
+
+nlags=40
+
+acf(z,nlags)
+pacf(z,nlags)
+
+```
+
+## Test for and Apply Differences
+Applying statistical tests, it is clear that one difference must be taken take account for **both** regular differences and seasonal differences in order to make the data stationary (logarithms played minor effect in improving variance stationarity). Therefore, the first iteration of the model will be a SARIMA (0,1,0) x (0,1,0).
+```{r}
+s=4      # seasonal parameter 
+nsdiffs(z,m=s,test=c("ocsb"))  # seasonal differences?
+ndiffs(z, alpha=0.05, test=c("adf")) # regular differences?
+
+fit<-arima(z,order=c(0,1,0),seasonal=list(order=c(0,1,0),period=s)) 
+fit
+
+ts.plot(fit$residuals)
+acf(fit$residuals,nlags)
+pacf(fit$residuals,nlags) 
+
+```
+
+## Apply Seasonal ARIMA Model
+Analyzing the previous ACF and PACF curves, it is apparent that there is a substanial limit breach at lag 4 with a dampening effect the subsequent 4 period intervals. As a result, SARIMA (0,1,0) x (1,1,0) was applied. According to the model coefficient output and ACF/PACF graphs, it is clear that the inclusion of this first degree variable is beneficial as it's coefficient is statistically different from 0 and there are no longer seasonal lags breaching limits.
+```{r}
+fit<-arima(z,order=c(0,1,0),seasonal=list(order=c(1,1,0),period=s)) 
+fit
+
+ts.plot(fit$residuals)
+acf(fit$residuals,nlags)
+pacf(fit$residuals,nlags) 
+```
+
+## Apply Standard ARIMA Model
+Analyzing the previous ACF and PACF curves, the most substanial limit breach occurs at lag 8 in the PACF graph. Therefore SARIMA (8,1,0) x (1,1,0) will be applied. Looking at the resulting ACF/PACF graphs it appears this should be a suitable model, however viewing the model coeffcients, the SARIMA coefficient is no longer significant.
+```{r}
+model_fit3<-arima(z,order=c(8,1,0),seasonal=list(order=c(1,1,0),period=s)) 
+model_fit3
+
+ts.plot(model_fit3$residuals)
+acf(model_fit3$residuals,nlags)
+pacf(model_fit3$residuals,nlags) 
+```
+
+## Remove Seasonal AR(1)
+Per the above, in order to minimize model complexity the Seasonal Autoregressive portion of the model will be removed (excluding the seasonal differences). The residuals remain within limits within all relevant lags and the standard AR(10) coefficient is found to be significant. Therefore, this model will be deployed for forecasting.
+```{r}
+model_fit4<-arima(z,order=c(8,1,0),seasonal=list(order=c(0,1,0),period=s)) 
+model_fit4
+
+ts.plot(model_fit4$residuals)
+acf(model_fit4$residuals,nlags)
+pacf(model_fit4$residuals,nlags) 
+```
+
+## Test for Normality and White Noise
+Based on the below outputs, all models produce residuals that are white noise, but are not normally distributed.
+
+```{r}
+###################### Model 1 ###################### 
+ndiffs(model_fit1$residuals, alpha=0.05, test=c("adf")) # regular differences?
+nsdiffs(model_fit1$residuals, m=s,test=c("ocsb")) # seasonal differences?
+
+#Test for White Noise
+Box.test(model_fit1$residuals,lag=24)
+
+#Test for Normality
+shapiro.test(model_fit1$residuals) 
+
+###################### Model 2 ###################### 
+ndiffs(model_fit2$residuals, alpha=0.05, test=c("adf")) # regular differences?
+nsdiffs(model_fit2$residuals, m=s,test=c("ocsb")) # seasonal differences?
+
+#Test for White Noise
+Box.test(model_fit2$residuals,lag=24)
+
+#Test for Normality
+shapiro.test(model_fit2$residuals) 
+
+###################### Model 3 ###################### 
+ndiffs(model_fit3$residuals, alpha=0.05, test=c("adf")) # regular differences?
+nsdiffs(model_fit3$residuals, m=s,test=c("ocsb")) # seasonal differences?
+
+#Test for White Noise
+Box.test(model_fit3$residuals,lag=24)
+
+#Test for Normality
+shapiro.test(model_fit3$residuals) 
+
+###################### Model 4 ###################### 
+ndiffs(model_fit4$residuals, alpha=0.05, test=c("adf")) # regular differences?
+nsdiffs(model_fit4$residuals, m=s,test=c("ocsb")) # seasonal differences?
+
+#Test for White Noise
+Box.test(model_fit4$residuals,lag=24)
+
+#Test for Normality
+shapiro.test(model_fit4$residuals) 
+
+```
+
+```{r}
+y_train_pred<-predict(model_fit1,n.ahead=24)
+y_train_pred$pred   # point predictions
+y_train_pred$se    # standard errors
+
+ts.plot(y)
+lines(y_train_pred$pred,col="red")
+lines(y_train_pred$pred+1.96*y_train_pred$se,col="red",lty=3)
+lines(y_train_pred$pred-1.96*y_train_pred$se,col="red",lty=3)
+```
+
+```{r}
+y_train_pred<-predict(model_fit2,n.ahead=24)
+y_train_pred$pred   # point predictions
+y_train_pred$se    # standard errors
+
+ts.plot(y)
+lines(y_train_pred$pred,col="red")
+lines(y_train_pred$pred+1.96*y_train_pred$se,col="red",lty=3)
+lines(y_train_pred$pred-1.96*y_train_pred$se,col="red",lty=3)
+```
+
+```{r}
+y_train_pred<-predict(model_fit3,n.ahead=24)
+y_train_pred$pred   # point predictions
+y_train_pred$se    # standard errors
+
+#Undo log transformation
+y_train_pred$pred <- exp(y_train_pred$pred)
+y_train_pred$se <- y_train_pred$pred * y_train_pred$se
+
+ts.plot(y)
+lines(y_train_pred$pred,col="red")
+lines(y_train_pred$pred+1.96*y_train_pred$se,col="red",lty=3)
+lines(y_train_pred$pred-1.96*y_train_pred$se,col="red",lty=3)
+```
+
+```{r}
+y_train_pred<-predict(model_fit4,n.ahead=24)
+y_train_pred$pred   # point predictions
+y_train_pred$se    # standard errors
+
+#Undo log transformation
+y_train_pred$pred <- exp(y_train_pred$pred)
+y_train_pred$se <- y_train_pred$pred * y_train_pred$se
+
+ts.plot(y)
+lines(y_train_pred$pred,col="red")
+lines(y_train_pred$pred+1.96*y_train_pred$se,col="red",lty=3)
+lines(y_train_pred$pred-1.96*y_train_pred$se,col="red",lty=3)
+```
