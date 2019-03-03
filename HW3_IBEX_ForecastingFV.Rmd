@@ -1,0 +1,339 @@
+---
+title: "FTS Homework 3 - IBEX Forecasting"
+author: "MBD O1 - Group F"
+date: "24 de febrero de 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+if(!"corrplot" %in% installed.packages()){install.packages("corrplot")}
+library(corrplot)
+if(!"fBasics" %in% installed.packages()){install.packages("fBasics")}
+library(fBasics)
+if(!"forecast" %in% installed.packages()){install.packages("forecast")}
+library(forecast) 
+if(!"fGarch" %in% installed.packages()) {install.packages("fGarch")}
+library(fGarch) 
+if(!"olsrr" %in% installed.packages()) {install.packages("olsrr")}
+library(olsrr)
+df<-read.csv("Homework3.DATA.csv",header=TRUE,sep=";",dec=",", fileEncoding="latin1")
+```
+## Exploratory analysis
+
+As an initial start point, we will scale the variables, plot the different time series and start by analyzing a possible correlation of the explanatory variables with IBEX (our independent variable).
+
+```{r }
+
+scaled_df<- scale(df)
+scaled_df<- subset(df, select=-c(Week))
+
+ts.plot(scaled_df[,1], col='red', main="IBEX vs Ex Rate")
+par(new=TRUE)
+ts.plot(scaled_df[,2], col='blue')
+
+ts.plot(scaled_df[,1], col='red', main="IBEX vs Short Term Rate")
+par(new=TRUE)
+ts.plot(scaled_df[,3], col='blue')
+
+ts.plot(scaled_df[,1], col='red', main="IBEX vs Long Term Rate")
+par(new=TRUE)
+ts.plot(scaled_df[,4], col='blue')
+
+cor_df<-cor(scaled_df)
+cor_df
+corrplot.mixed(cor_df)
+
+```
+
+## Best time series model for variable IBEX
+As an initial step, we will find the best Forecasting Model for IBEX as a stand-alone variable:
+
+```{r}
+y<-scaled_df$IBEX
+ts.plot(y)
+nlags <- 100
+acf(y,nlags)
+pacf(y, nlags)
+
+```
+
+In the series plot we can see the data isn't stationary in the mean.
+In the ACF plot, we can see a possible cycle in the data.
+Considering the data isn't stationary in the mean, with the Augmented Dickey Fuller Test we will analyze if we need differences in the data. 
+
+```{r}
+ndiffs(y,alpha=0.05, test=c("adf"))
+```
+
+We need to apply one difference to the series.
+
+```{r}
+ModelTS<-arima(y, order = c(0,1,0))
+plot(ModelTS$residuals)
+acf(ModelTS$residuals)
+pacf(ModelTS$residuals)
+shapiro.test(ModelTS$residuals)
+Box.test(ModelTS$residuals, lag = 50,type = "Ljung")
+```
+
+If we apply one difference to the data, the residuals appear to be stationary.
+We can see:
+
+* Constant mean
+* Constant Variance
+* No lags out of limits in the ACF nor PACF
+
+With the Shapiro test we fail to reject the null hypothesis and conclude the data is Normally Distributed with an 95% confidence.
+
+With the Box Ljung test we fail to reject the null hypothesis and conclude the data is not correlated.
+
+With this considerations we may conclude the data is WN, SWN and GWN.
+
+*The best TS Model is ARIMA(0,1,0)*
+
+## Regression Model
+
+In the correlation plot from the beginning, we can see there is a  correlation between all the different variables. Multicollinearity happens when we see such strong correlation between explanatory variables that adding variables to our model doesn't improve the final result. We will analyze if this is the case:
+
+We will start by analyzing which is the best linear model with stepwise regression. As we can see in the following tables, the stepwise regression includes all the explanatory variables concluding that all of them are actually relevant and we do not have multicollinearity.
+
+```{r }
+model <- IBEX~.
+fit<- lm(model ,scaled_df)
+stepw_mod <- ols_step_both_p(fit, pent = 0.05, prem = 0.3, details = F)
+```
+
+```{r}
+IBEX <- scaled_df$IBEX
+Dep_Variables <- as.data.frame(subset(scaled_df, select = -c(IBEX)))
+Ex_rate <- scaled_df$Exchange.rate....
+Short_Rate <- scaled_df$Short.term.rate
+Long_Rate <- scaled_df$Long.term.rate
+
+Modellr=lm(scaled_df$IBEX~Ex_rate+Short_Rate+Long_Rate)
+summary(Modellr)
+
+```
+Our final linear model for IBEX includes the three explanatory variables as stated in the previous coefficients table. IBEX is a function of Ex_Rate, Short_Rate and Long_Rate.
+
+## Regression model WITH Time Series Errors
+
+Now that we have a *linear model*, we will see if the residuals are White Noise
+```{r}
+plot(Modellr$residuals, type='l')
+acf(Modellr$residuals, lag=40)
+pacf(Modellr$residuals, lag=40)
+
+```
+
+We can see the residuals are not White Noise so we will apply one difference to the model and plot the ACF and PACF.
+
+```{r}
+plot(diff(Modellr$residuals), type='l')
+acf(diff(Modellr$residuals), lag=40)
+pacf(diff(Modellr$residuals), lag=40)
+```
+
+We can see that by applying one difference to the linear model (dependent and independent variables), the residuals appear to be white noise.
+
+```{r}
+#These are the new time series we have to work with:
+dibex <- diff(IBEX)
+dEx_Rate <- diff(Ex_rate)
+dShortRate <- diff(Short_Rate)
+dLongRate <- diff(Long_Rate)
+
+ddf <- cbind(dibex,dEx_Rate,dShortRate,dLongRate) #differenced complete matrix to see correlations
+Dexpl <- cbind(dEx_Rate,dShortRate,dLongRate) #differenced dependent variables only to run the lm
+
+cddf <- cor(ddf)
+corrplot.mixed(cddf)
+
+```
+
+We can see that the correlations in the differences data are smaller than the original correlations.
+We will now build our linear regression model with these variables.
+
+```{r}
+Modellrts <- lm(dibex~dEx_Rate+dShortRate+dLongRate)
+summary(Modellrts)
+```
+
+In the previous model we can see dShortRate is not significant in the model. We will compute a new linear model removing this variable.
+
+```{r}
+Modellrts2<- lm(dibex~dEx_Rate+dLongRate)
+summary(Modellrts2)
+
+```
+
+Now we will look to the ACF and PACF of the residuals.
+
+```{r}
+acf(Modellrts2$residuals,lag=40)
+pacf(Modellrts2$residuals,lag=40)
+Box.test(Modellrts2$residuals)
+```
+
+With the Box test we fail to reject the Null Hypothesis and conclude the data isn't correlated, so we may have WN and work with this first model. ARIMA(0,1,0)
+
+However, in the PACF we can see a lag in 4. We will apply a ARIMA(4,0,0) to the transformed model (ARIMA(4,1,0) to the original data)
+
+```{r}
+Dexpl2 <- cbind(dEx_Rate,dLongRate)
+Modellrts3<-arima(dibex,order=c(4,0,0),xreg=Dexpl2,include.mean=F)
+Modellrts3
+```
+
+We can see that ar4 is significant while ar1, ar2, and ar3 aren't. In this new model we will test if the residuals are WN.
+
+```{r}
+plot(Modellrts3$residuals)
+acf(Modellrts3$residuals,lag=40)
+pacf(Modellrts3$residuals,lag=40)
+
+```
+
+We now can see constant mean, constant variance and no lags out of limits for the ACF and PACF, therefore the residuals appear to be WN. 
+With the Shapiro test we fail to reject the null hypothesis and conclude the residuals are normally distributed.
+With the Box test we fail to reject the null hypothesis and conclude the residuals are uncorrelated.
+Taking this into consideration, we have WN, SWN and GWN residuals.
+
+```{r}
+shapiro.test(Modellrts3$residuals)
+Box.test(Modellrts3$residuals)
+
+```
+
+## Model comparison:
+
+Now we have four models:
+
+* TS only model --> ModelTS --> ARIMA(0,1,0)
+* Linear Regression only model --> Modellr --> 
+  IBEX = 5231.68 + 783.34ExRate - 88.7ShortRate - 172.16LongRate
+* Linear Regression with TS Errors --> Modellrts3 --> 
+  IBEX ~ f(Ex_Rate, LongRate)
+  ARIMA(4,1,0)
+* Linear Regression with TS Errors --> IBEX ~ f(Ex_Rate, LongRate)
+  ARIMA(0,1,0)
+
+We can see that the LR with TS errors may be different from the two previous models in the number of lags if we consider lag # 4 from the Autoregressive Part of the ARIMA, and different number of regressors from the linear regression model (we don't include Short Term Rate).
+
+Now we will see which model is the best:
+
+```{r}
+
+summary(ModelTS)
+summary(Modellr)
+summary(Modellrts3)
+
+# Histogram Model TS
+hist(ModelTS$residuals,prob=T,xlim=c(mean(ModelTS$residuals)-3*sd(ModelTS$residuals),mean(ModelTS$residuals)+3*sd(ModelTS$residuals)),col="red",main = "TS Model ARIMA(0,1,0)")
+lines(density(ModelTS$residuals))
+mu<-mean(ModelTS$residuals)
+sigma<-sd(ModelTS$residuals)
+x<-seq(mu-3*sigma,mu+3*sigma,length=100)
+yy<-dnorm(x,mu,sigma)
+lines(x,yy,lwd=2,col="blue")
+
+shapiro.test(ModelTS$residuals)
+
+#Histogram model Lin Reg
+hist(Modellr$residuals, prob=T, xlim = c(mean(Modellr$residuals)-3*sd(Modellr$residuals),mean(Modellr$residuals)+3*sd(Modellr$residuals)),col = 'red', main = "Lin Reg Model")
+lines(density(Modellr$residuals))
+mu<-mean(Modellr$residuals)
+sigma<-sd(Modellr$residuals)
+x<-seq(mu-3*sigma,mu+3*sigma,length=100)
+yy<-dnorm(x,mu,sigma)
+lines(x,yy,lwd=2,col="blue")
+
+shapiro.test(Modellr$residuals)
+
+#Histogram Model TS+LinReg
+hist(Modellrts3$residuals, prob=T, xlim = c(mean(Modellrts3$residuals)-3*sd(Modellrts3$residuals),mean(Modellrts3$residuals)+3*sd(Modellrts3$residuals)), col = 'red', main = "RegLin ARIMA(4,1,0)")
+lines(density(Modellrts3$residuals))
+mu<-mean(Modellrts3$residuals)
+sigma<-sd(Modellrts3$residuals)
+x<-seq(mu-3*sigma,mu+3*sigma,length=100)
+yy<-dnorm(x,mu,sigma)
+lines(x,yy,lwd=2,col="blue")
+
+shapiro.test(Modellrts3$residuals)
+
+expl<-cbind(Ex_rate,Long_Rate)
+Modellrts4 <- arima(y, order=c(0,1,0),xreg = expl,include.mean=F)
+hist(Modellrts4$residuals, prob=T, xlim = c(mean(Modellrts4$residuals)-3*sd(Modellrts4$residuals),mean(Modellrts4$residuals)+3*sd(Modellrts4$residuals)), col = 'red', main = "RegLin ARIMA(0,1,0)")
+lines(density(Modellrts4$residuals))
+mu<-mean(Modellrts4$residuals)
+sigma<-sd(Modellrts4$residuals)
+x<-seq(mu-3*sigma,mu+3*sigma,length=100)
+yy<-dnorm(x,mu,sigma)
+lines(x,yy,lwd=2,col="blue")
+
+shapiro.test(Modellrts4$residuals)
+summary(Modellrts4)
+
+```
+
+
+The four previous models show the following RMSE (Root Mean Squared Error):
+
+* ARIMA(0,1,0) --> RMSE = 80.05
+* LM --> Residual Standard Error = 129.3
+* LM+ARIMA(4,1,0) --> RMSE = 55.08
+* LM+ARIMA(0,1,0) --> RMSE = 57.082
+
+We can see the best model is the LM+ARIMA(4,1,0) considering that it has the smallest Root Mean Squared Error. However, the LM+ARIMA(0,1,0) also shows a small RMSE, similar to the LM+ARIMA(4,1,0). Maybe for simplicity, using the LM+ARIMA(0,1,0) is the best solution at the end.
+
+We will continue our analysis with comparing these two models.
+
+## Forecasting Ex_Rate and Long Term Rate
+
+The first step to forecast IBEX is forecasting the explanatory variables Ex_Rate and Long Term Rate.
+We can see that both time series with one difference are white noise.The best prediction for the residuals of these models is the mean. We will predict one step ahead of these two explanatory variables and undo the difference to predict the original series.
+
+```{r}
+plot(Ex_rate, type = 'l')
+ExRate_ARIMA <- Arima(Ex_rate, order = c(0,1,0))
+acf(ExRate_ARIMA$residuals)
+pacf(ExRate_ARIMA$residuals)
+
+plot(Long_Rate, type = 'l')
+LongRate_ARIMA <- Arima(Long_Rate, order = c(0,1,0))
+acf(LongRate_ARIMA$residuals)
+pacf(LongRate_ARIMA$residuals)
+
+ExRate_prediction <- predict(ExRate_ARIMA, n.ahead = 1)
+LongRate_prediction<-predict(LongRate_ARIMA, n.ahead = 1)
+
+ExRate_prediction$pred
+LongRate_prediction$pred
+```
+Now, we will predict the IBEX in both models considering the one point prediction of the explanatory variables.
+
+```{r}
+newdExRate <- ExRate_prediction$pred
+newdLongRate <- LongRate_prediction$pred
+lrpredictors <- as.matrix(cbind(newdExRate,newdLongRate))
+
+expl<-cbind(Ex_rate,Long_Rate)
+LR_ARIMA_4_1_0 <- arima(y, order=c(4,1,0),xreg = expl,include.mean=F)
+LR_ARIMA_4_1_0
+
+LR_ARIMA_0_1_0 <- arima(y, order=c(0,1,0),xreg = expl,include.mean=F)
+LR_ARIMA_0_1_0
+
+
+LRARIMA410_predict<-predict(LR_ARIMA_4_1_0,newxreg=lrpredictors, n.ahead = 1)
+LRARIMA410_predict
+LRARIMA010_predict<-predict(LR_ARIMA_0_1_0,newxreg=lrpredictors, n.ahead = 1)
+LRARIMA010_predict
+```
+
+We see the following one point predictions:
+
+* LR_ARIMA(0,1,0) --> Pred = 3357.00, S.E. = +- 57.24
+* LR_ARIMA(4,1,0) --> Pred = 3356.88, S.E. = +- 55.08
+
+The predictions are very close (considering they are only one point prediction) and the standard error is slightly smaller in the LR_ARIMA(4,1,0). However, the LR_ARIMA(0,1,0) model may be simpler and does not rely on data from 4 periods in the past to predict the next period.
